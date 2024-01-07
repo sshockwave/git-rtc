@@ -17,9 +17,9 @@ pub struct ObjectStore {
 }
 
 impl ObjectStore {
-    pub fn at(git_dir: impl AsRef<Path>) -> io::Result<Self> {
+    pub fn at(git_dir: &Path) -> io::Result<Self> {
         let hash_kind = HashType::Sha1;
-        let objects_dir = git_dir.as_ref().join("objects");
+        let objects_dir = git_dir.join("objects");
         {
             let mut alternates = objects_dir.clone();
             alternates.push("info");
@@ -34,13 +34,13 @@ impl ObjectStore {
         let temp_dir = objects_dir.join("temp");
         Ok(Self {
             obj_store: gix_odb::at_opts(
-                git_dir.as_ref().to_path_buf(),
+                git_dir.to_path_buf(),
                 std::iter::empty(),
                 gix_odb::store::init::Options {
                     slots: Default::default(),
                     object_hash: hash_kind,
                     use_multi_pack_index: true,
-                    current_dir: Some(git_dir.as_ref().to_path_buf()),
+                    current_dir: Some(git_dir.to_path_buf()),
                 },
             )?,
             objects_dir,
@@ -64,7 +64,7 @@ impl ObjectStore {
     ) -> io::Result<(ObjectType, u64, Result<impl Read + Seek, impl BufRead>)> {
         let mut file = fs::File::open(loose::object_path(self.objects_dir.clone(), oid))?;
         flate::ZlibHeader::parse(&mut file)?;
-        let deflate = git_rtc_fmt::ParsedDeflate::parse(file)?;
+        let deflate = flate::ParsedDeflate::parse(file)?;
         Ok(match deflate.into_reader() {
             Ok(reader) => {
                 let (kind, len, reader) = loose::parse_seek_header(reader)?;

@@ -10,7 +10,6 @@ members = [
   "src/cli",
   "src/lib",
   "src/api",
-  "src/fmt",
   "src/vfs",
   "src/odb",
 ]
