@@ -3,7 +3,7 @@ mod flate;
 pub use gix_hash::{Kind as HashType, ObjectId};
 pub use gix_object::{find::Error as FindError, Kind as ObjectType};
 use std::{
-    io::{BufRead, BufReader, Read, Seek, Write},
+    io::{self, BufRead, BufReader, Read, Seek, Write},
     path::{Path, PathBuf},
 };
 
@@ -36,14 +36,18 @@ fn loose_object_path(mut path: PathBuf, oid: ObjectId) -> PathBuf {
     }
 }
 
-fn open_if_exists(path: &Path) -> std::io::Result<Option<std::fs::File>> {
-    match std::fs::File::open(path) {
-        Ok(file) => Ok(Some(file)),
+fn allow_not_found<T>(result: io::Result<T>) -> io::Result<Option<T>> {
+    match result {
+        Ok(v) => Ok(Some(v)),
         Err(e) => match e.kind() {
-            std::io::ErrorKind::NotFound => Ok(None),
+            io::ErrorKind::NotFound => Ok(None),
             _ => Err(e),
         },
     }
+}
+
+fn open_if_exists(path: &Path) -> std::io::Result<Option<std::fs::File>> {
+    allow_not_found(std::fs::File::open(path))
 }
 
 impl ObjectStore {
