@@ -1,4 +1,5 @@
 mod flate;
+mod loose;
 
 pub use gix_hash::{Kind as HashType, ObjectId};
 pub use gix_object::{find::Error as FindError, Kind as ObjectType};
@@ -7,33 +8,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn file_to_stream(reader: impl Read) -> Result<(ObjectType, u64, impl BufRead), FindError> {
-    let mut reader = BufReader::new(flate::decode_zlib(BufReader::new(reader)));
-    let (kind, len, _) = git_rtc_fmt::git::parse_stream_header(&mut reader)?;
-    Ok((kind, len, reader))
-}
-
 // https://git-scm.com/docs/gitrepository-layout
 pub struct ObjectStore {
     obj_store: gix_odb::Handle,
     objects_dir: PathBuf,
     temp_dir: PathBuf,
-}
-
-fn loose_object_path(mut path: PathBuf, oid: ObjectId) -> PathBuf {
-    fn byte_to_hex(b: u8) -> String {
-        format!("{:02x}", b)
-    }
-    fn bytes_to_hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| byte_to_hex(*b)).collect()
-    }
-    match oid {
-        ObjectId::Sha1(sha1) => {
-            path.push(byte_to_hex(sha1[0]));
-            path.push(bytes_to_hex(&sha1[1..]));
-            path
-        }
-    }
 }
 
 fn allow_not_found<T>(result: io::Result<T>) -> io::Result<Option<T>> {
@@ -76,8 +55,8 @@ impl ObjectStore {
         oid: ObjectId,
     ) -> Result<Option<(ObjectType, u64, impl BufRead)>, FindError> {
         Ok(
-            match open_if_exists(&loose_object_path(self.objects_dir.clone(), oid))? {
-                Some(f) => Some(file_to_stream(f)?),
+            match open_if_exists(&loose::object_path(self.objects_dir.clone(), oid))? {
+                Some(f) => Some(loose::file_to_stream(f)?),
                 None => None,
             },
         )
@@ -87,7 +66,7 @@ impl ObjectStore {
         &self,
         oid: ObjectId,
     ) -> Result<Option<(ObjectType, u64, Result<impl Read + Seek, impl BufRead>)>, FindError> {
-        let mut file = match open_if_exists(&loose_object_path(self.objects_dir.clone(), oid))? {
+        let mut file = match open_if_exists(&loose::object_path(self.objects_dir.clone(), oid))? {
             Some(f) => f,
             None => return Ok(None),
         };
@@ -100,7 +79,7 @@ impl ObjectStore {
             }
             Err(mut reader) => {
                 reader.rewind()?;
-                let (kind, len, reader) = file_to_stream(reader)?;
+                let (kind, len, reader) = loose::file_to_stream(reader)?;
                 (kind, len, Err(reader))
             }
         }))
@@ -182,7 +161,7 @@ impl WriteHandle {
             HashState::Sha1(state) => ObjectId::Sha1(state.finalize().into()),
         };
         let file = self.out.finish()?;
-        let path = loose_object_path(self.objects_dir, oid);
+        let path = loose::object_path(self.objects_dir, oid);
         match file.persist_noclobber(&path) {
             Ok(_) => {}
             Err(e) => match open_if_exists(&path)? {
