@@ -2,20 +2,6 @@
 
 use std::io::{self, Read, Seek, SeekFrom};
 
-#[derive(Debug)]
-pub enum Error {
-    ReservedBtype { block_position: u64 },
-    OnesComplementMismatch { block_position: u64 },
-    IOErr(io::Error),
-}
-
-impl std::error::Error for Error {}
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        todo!()
-    }
-}
-
 pub struct ParsedDeflate<R: Read + Seek> {
     src: R,
     block_end: Vec<(u64, u64)>, // src_offset, out_offset of the end of each block
@@ -23,45 +9,49 @@ pub struct ParsedDeflate<R: Read + Seek> {
 }
 
 impl<R: Read + Seek> ParsedDeflate<R> {
-    pub fn parse(mut src: R) -> Result<Self, Error> {
-        use Error::IOErr;
+    pub fn parse(mut src: R) -> io::Result<Self> {
         let mut block_end = Vec::new();
         let mut more = true;
-        let mut src_pos = src.stream_position().map_err(IOErr)?;
+        let mut src_pos = src.stream_position()?;
         let mut out_pos = 0u64;
         while more {
             let mut header = [0u8];
-            src.read_exact(&mut header).map_err(IOErr)?;
+            src.read_exact(&mut header)?;
             let bfinal = header[0] & 1;
             let btype = (header[0] >> 1) & 3;
             match btype {
                 // no compression
                 0b00 => {
                     let mut len_buf = [0u8; 4];
-                    src.read_exact(&mut len_buf).map_err(IOErr)?;
+                    src.read_exact(&mut len_buf)?;
                     more = bfinal == 0;
                     let len = len_buf[0] as u16 | ((len_buf[1] as u16) << 8u16);
                     let nlen = len_buf[2] as u16 | ((len_buf[3] as u16) << 8u16);
                     if len != !nlen {
-                        return Err(Error::OnesComplementMismatch {
-                            block_position: src_pos,
-                        });
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!(
+                                "invalid nlen {} for len {} at offset {}",
+                                nlen, len, src_pos,
+                            ),
+                        ));
                     }
-                    src_pos = src.seek(SeekFrom::Current(len as i64)).map_err(IOErr)?;
+                    src_pos = src.seek(SeekFrom::Current(len as i64))?;
                     out_pos += len as u64;
                     block_end.push((src_pos, out_pos));
                 }
                 // compressed
                 0b01 | 0b10 => {
                     // rewind to block start
-                    src.seek(SeekFrom::Start(src_pos)).map_err(IOErr)?;
+                    src.seek(SeekFrom::Start(src_pos))?;
                     break;
                 }
                 // reserved
                 0b11 => {
-                    return Err(Error::ReservedBtype {
-                        block_position: src_pos,
-                    });
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unexpected reserved BTYPE 11 at offset {}", src_pos),
+                    ));
                 }
                 4u8..=u8::MAX => unreachable!(),
             }

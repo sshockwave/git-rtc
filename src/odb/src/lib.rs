@@ -46,12 +46,12 @@ fn allow_not_found<T>(result: io::Result<T>) -> io::Result<Option<T>> {
     }
 }
 
-fn open_if_exists(path: &Path) -> std::io::Result<Option<std::fs::File>> {
+fn open_if_exists(path: &Path) -> io::Result<Option<std::fs::File>> {
     allow_not_found(std::fs::File::open(path))
 }
 
 impl ObjectStore {
-    pub fn at(git_dir: impl AsRef<Path>) -> std::io::Result<Self> {
+    pub fn at(git_dir: impl AsRef<Path>) -> io::Result<Self> {
         let hash_kind = HashType::Sha1;
         let objects_dir = git_dir.as_ref().join("objects");
         let temp_dir = objects_dir.join("temp");
@@ -124,7 +124,7 @@ impl ObjectStore {
         hash_type: HashType,
         len: u64,
         compression: bool,
-    ) -> std::io::Result<WriteHandle> {
+    ) -> io::Result<WriteHandle> {
         use sha1::Digest;
         if !self.temp_dir.exists() {
             std::fs::create_dir_all(&self.temp_dir)?;
@@ -162,7 +162,7 @@ pub struct WriteHandle {
 }
 
 impl Write for WriteHandle {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         use sha1::Digest;
         match &mut self.hash_state {
             HashState::Sha1(state) => state.update(buf),
@@ -170,13 +170,13 @@ impl Write for WriteHandle {
         self.out.write(buf)
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         self.out.flush()
     }
 }
 
 impl WriteHandle {
-    pub fn end(self) -> std::io::Result<ObjectId> {
+    pub fn end(self) -> io::Result<ObjectId> {
         use sha1::Digest;
         let oid = match self.hash_state {
             HashState::Sha1(state) => ObjectId::Sha1(state.finalize().into()),
@@ -198,7 +198,7 @@ impl WriteHandle {
     }
 }
 
-fn streams_equal(mut reader1: impl Read, mut reader2: impl Read) -> std::io::Result<bool> {
+fn streams_equal(mut reader1: impl Read, mut reader2: impl Read) -> io::Result<bool> {
     let mut buffer1 = [0; 4096];
     let mut buffer2 = [0; 4096];
     let mut begin1 = 0usize;
