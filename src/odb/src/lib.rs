@@ -18,7 +18,7 @@ pub struct ObjectStore {
     temp_dir: PathBuf,
 }
 
-fn loose_object_path(objects_dir: &Path, oid: ObjectId) -> PathBuf {
+fn loose_object_path(mut path: PathBuf, oid: ObjectId) -> PathBuf {
     fn byte_to_hex(b: u8) -> String {
         format!("{:02x}", b)
     }
@@ -27,7 +27,7 @@ fn loose_object_path(objects_dir: &Path, oid: ObjectId) -> PathBuf {
     }
     match oid {
         ObjectId::Sha1(sha1) => {
-            let mut path = objects_dir.join(byte_to_hex(sha1[0]));
+            path.push(byte_to_hex(sha1[0]));
             path.push(bytes_to_hex(&sha1[1..]));
             path
         }
@@ -70,7 +70,7 @@ impl ObjectStore {
         oid: ObjectId,
     ) -> Result<Option<(ObjectType, u64, impl BufRead)>, FindError> {
         Ok(
-            match open_if_exists(&loose_object_path(&self.objects_dir, oid))? {
+            match open_if_exists(&loose_object_path(self.objects_dir.clone(), oid))? {
                 Some(f) => Some(file_to_stream(f)?),
                 None => None,
             },
@@ -81,7 +81,7 @@ impl ObjectStore {
         &self,
         oid: ObjectId,
     ) -> Result<Option<(ObjectType, u64, Result<impl Read + Seek, impl BufRead>)>, FindError> {
-        let mut file = match open_if_exists(&loose_object_path(&self.objects_dir, oid))? {
+        let mut file = match open_if_exists(&loose_object_path(self.objects_dir.clone(), oid))? {
             Some(f) => f,
             None => return Ok(None),
         };
@@ -175,17 +175,50 @@ impl WriteHandle {
             HashState::Sha1(state) => ObjectId::Sha1(state.finalize().into()),
         };
         let file = self.out.finish()?;
-        let path = loose_object_path(&self.objects_dir, oid);
+        let path = loose_object_path(self.objects_dir, oid);
         match file.persist_noclobber(&path) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => match open_if_exists(&path)? {
                 Some(old) => {
-                    let cur = e.file;
-                    todo!("check if existing object is the same")
+                    let reader1 = git_rtc_fmt::decode_zlib(BufReader::new(old));
+                    let reader2 = git_rtc_fmt::decode_zlib(BufReader::new(e.file));
+                    assert!(streams_equal(reader1, reader2)?);
                 }
                 None => return Err(e.error),
             },
         }
         Ok(oid)
+    }
+}
+
+fn streams_equal(mut reader1: impl Read, mut reader2: impl Read) -> std::io::Result<bool> {
+    let mut buffer1 = [0; 4096];
+    let mut buffer2 = [0; 4096];
+    let mut begin1 = 0usize;
+    let mut end1 = 0usize;
+    let mut begin2 = 0usize;
+    let mut end2 = 0usize;
+
+    loop {
+        if begin1 == end1 {
+            begin1 = 0;
+            end1 = reader1.read(&mut buffer1)?;
+        }
+        if begin2 == end2 {
+            begin2 = 0;
+            end2 = reader2.read(&mut buffer2)?;
+        }
+
+        let cmp_len = std::cmp::min(end1 - begin1, end2 - begin2);
+        if cmp_len == 0 {
+            return Ok(begin1 == end1 && begin2 == end2);
+        }
+        let new_begin1 = begin1 + cmp_len;
+        let new_begin2 = begin2 + cmp_len;
+        if buffer1[begin1..new_begin1] != buffer2[begin2..new_begin2] {
+            return Ok(false);
+        }
+        begin1 = new_begin1;
+        begin2 = new_begin2;
     }
 }
