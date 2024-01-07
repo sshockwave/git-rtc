@@ -87,13 +87,14 @@ impl ObjectStore {
         };
         git_rtc_fmt::ZlibHeader::parse(&mut file)?;
         let deflate = git_rtc_fmt::ParsedDeflate::parse(file).map_err(|e| Box::new(e))?;
-        Ok(Some(match deflate.into_seek_reader() {
+        Ok(Some(match deflate.into_reader() {
             Ok(reader) => {
                 let (kind, len, reader) = git_rtc_fmt::git::parse_seek_header(reader)?;
                 (kind, len, Ok(reader))
             }
-            Err(reader) => {
-                let (kind, len, reader) = file_to_stream(reader.into_inner())?;
+            Err(mut reader) => {
+                reader.rewind()?;
+                let (kind, len, reader) = file_to_stream(reader)?;
                 (kind, len, Err(reader))
             }
         }))
@@ -126,7 +127,7 @@ impl ObjectStore {
             out: flate2::write::DeflateEncoder::new(
                 tempfile::NamedTempFile::new_in(self.temp_dir.as_path())?,
                 if compression {
-                    flate2::Compression::default()
+                    flate2::Compression::best()
                 } else {
                     flate2::Compression::none()
                 },
@@ -169,7 +170,7 @@ impl Write for WriteHandle {
 }
 
 impl WriteHandle {
-    fn end(self) -> std::io::Result<ObjectId> {
+    pub fn end(self) -> std::io::Result<ObjectId> {
         use sha1::Digest;
         let oid = match self.hash_state {
             HashState::Sha1(state) => ObjectId::Sha1(state.finalize().into()),
