@@ -1,4 +1,4 @@
-use git_rtc_fmt::git::{parse_seek_header, parse_stream_header};
+use gix_hash::ObjectId;
 use gix_object::{find::Error as FindError, Kind};
 use std::{
     io::{BufRead, BufReader, Read, Seek},
@@ -12,10 +12,10 @@ pub struct Repository {
     obj_path: PathBuf,
 }
 
-fn file_to_stream(reader: impl Read + Seek) -> Result<(Kind, u64, impl BufRead), FindError> {
+fn file_to_stream(reader: impl Read) -> Result<(Kind, u64, impl BufRead), FindError> {
     let mut reader = BufReader::new(git_rtc_fmt::decode_zlib(BufReader::new(reader)));
-    let (kind, size, _) = parse_stream_header(&mut reader)?;
-    Ok((kind, size, reader))
+    let (kind, len, _) = git_rtc_fmt::git::parse_stream_header(&mut reader)?;
+    Ok((kind, len, reader))
 }
 
 macro_rules! join_path {
@@ -79,56 +79,55 @@ impl Repository {
         }
     }
 
-    fn open_object_from_packs(
-        &self,
-        oid: gix_hash::ObjectId,
-    ) -> Result<Option<(Kind, Vec<u8>)>, gix_object::find::Error> {
-        let mut buffer = Vec::new();
-        use gix_object::Find;
-        Ok(
-            if let Some(data) = self.obj_store.try_find(&oid, &mut buffer)? {
-                Some((data.kind, buffer))
-            } else {
-                None
+    fn open_loose_object(&self, oid: ObjectId) -> std::io::Result<Option<std::fs::File>> {
+        let loose_path = self.loose_object_path(oid);
+        match std::fs::File::open(loose_path) {
+            Ok(file) => Ok(Some(file)),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => Ok(None),
+                _ => Err(e),
             },
-        )
+        }
     }
 
-    pub fn open_object_seek(
+    pub fn open_loose_object_stream(
         &self,
-        oid: gix_hash::ObjectId,
-    ) -> Result<
-        Option<(
-            Kind,
-            u64,
-            SeekResult<impl AsRef<[u8]>, impl BufRead, impl Read + Seek>,
-        )>,
-        gix_object::find::Error,
-    > {
-        let loose_path = self.loose_object_path(oid);
-        Ok(if loose_path.exists() {
-            let mut file = std::fs::File::open(loose_path)?;
-            git_rtc_fmt::ZlibHeader::parse(&mut file)?;
-            let deflate = git_rtc_fmt::ParsedDeflate::parse(file).map_err(|e| Box::new(e))?;
-            Some(match deflate.into_seek_reader() {
-                Ok(reader) => {
-                    let (kind, len, reader) = parse_seek_header(reader)?;
-                    (kind, len, SeekResult::Seek(reader))
-                }
-                Err(reader) => {
-                    let (kind, len, reader) = file_to_stream(reader.into_inner())?;
-                    (kind, len, SeekResult::Stream(reader))
-                }
-            })
-        } else {
-            self.open_object_from_packs(oid)?
-                .map(|(kind, data)| (kind, data.len() as u64, SeekResult::Buffer(data)))
+        oid: ObjectId,
+    ) -> Result<Option<(Kind, u64, impl BufRead)>, FindError> {
+        Ok(match self.open_loose_object(oid)? {
+            Some(f) => Some(file_to_stream(f)?),
+            None => None,
         })
     }
-}
 
-enum SeekResult<B, R, S> {
-    Buffer(B),
-    Stream(R),
-    Seek(S),
+    pub fn open_loose_object_seek(
+        &self,
+        oid: ObjectId,
+    ) -> Result<Option<(Kind, u64, Result<impl Read + Seek, impl BufRead>)>, FindError> {
+        let mut file = match self.open_loose_object(oid)? {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+        git_rtc_fmt::ZlibHeader::parse(&mut file)?;
+        let deflate = git_rtc_fmt::ParsedDeflate::parse(file).map_err(|e| Box::new(e))?;
+        Ok(Some(match deflate.into_seek_reader() {
+            Ok(reader) => {
+                let (kind, len, reader) = git_rtc_fmt::git::parse_seek_header(reader)?;
+                (kind, len, Ok(reader))
+            }
+            Err(reader) => {
+                let (kind, len, reader) = file_to_stream(reader.into_inner())?;
+                (kind, len, Err(reader))
+            }
+        }))
+    }
+
+    pub fn open_packed_object(&self, oid: ObjectId) -> Result<Option<(Kind, Vec<u8>)>, FindError> {
+        let mut buffer = Vec::new();
+        use gix_object::Find;
+        Ok(match self.obj_store.try_find(&oid, &mut buffer)? {
+            Some(data) => Some((data.kind, buffer)),
+            None => None,
+        })
+    }
 }
