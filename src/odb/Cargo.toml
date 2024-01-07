@@ -10,3 +10,6 @@ gix-hash = "0.14.1"
 gix-odb = "0.56.1"
 git-rtc-fmt = { path = "../fmt" }
 gix-object = "0.40.1"
+tempfile = "3.9.0"
+flate2 = "1.0.28"
+sha1 = "0.10.6"
