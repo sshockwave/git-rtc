@@ -1,7 +1,7 @@
 use super::{ObjectId, ObjectType};
 use std::{
-    io,
-    path::{Path, PathBuf},
+    io::{self, BufRead, BufReader, Read, Seek},
+    path::PathBuf,
 };
 
 pub fn object_path(mut objects_dir: PathBuf, oid: ObjectId) -> PathBuf {
@@ -20,10 +20,54 @@ pub fn object_path(mut objects_dir: PathBuf, oid: ObjectId) -> PathBuf {
     }
 }
 
-pub fn file_to_stream(
-    reader: impl io::Read,
-) -> Result<(ObjectType, u64, impl io::BufRead), crate::FindError> {
-    let mut reader = io::BufReader::new(crate::flate::decode_zlib(io::BufReader::new(reader)));
-    let (kind, len, _) = git_rtc_fmt::git::parse_stream_header(&mut reader)?;
+pub fn file_to_stream(reader: impl Read) -> io::Result<(ObjectType, u64, impl BufRead)> {
+    let mut reader = BufReader::new(crate::flate::decode_zlib(BufReader::new(reader)));
+    let (kind, len, _) = parse_stream_header(&mut reader)?;
     Ok((kind, len, reader))
+}
+
+const MAX_HEADER_LEN: usize = 10;
+
+pub fn parse_stream_header(reader: &mut impl BufRead) -> io::Result<(ObjectType, u64, usize)> {
+    let mut buffer = Vec::new();
+    (&mut *reader)
+        .take(MAX_HEADER_LEN as u64)
+        .read_until(0, &mut buffer)?;
+    gix_object::decode::loose_header(buffer.as_ref())
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+struct OffsetSeek<T: Read + Seek> {
+    data: T,
+    offset: usize,
+}
+
+impl<T: Read + Seek> Read for OffsetSeek<T> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.data.read(buf)
+    }
+}
+
+impl<T: Read + Seek> Seek for OffsetSeek<T> {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        use io::SeekFrom::*;
+        match pos {
+            Start(pos) => self.data.seek(Start(pos + self.offset as u64)),
+            End(pos) => self.data.seek(End(pos)),
+            Current(pos) => self.data.seek(Current(pos)),
+        }
+    }
+}
+
+pub fn parse_seek_header(
+    reader: impl Read + Seek,
+) -> io::Result<(ObjectType, u64, impl Read + Seek)> {
+    let mut reader = BufReader::with_capacity(MAX_HEADER_LEN, reader);
+    let (kind, size, consumed_bytes) = parse_stream_header(&mut reader)?;
+    let mut reader = OffsetSeek {
+        data: reader.into_inner(),
+        offset: consumed_bytes,
+    };
+    reader.seek(io::SeekFrom::Start(0))?;
+    Ok((kind, size, reader))
 }

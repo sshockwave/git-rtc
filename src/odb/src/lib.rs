@@ -4,6 +4,7 @@ mod loose;
 pub use gix_hash::{Kind as HashType, ObjectId};
 pub use gix_object::{find::Error as FindError, Kind as ObjectType};
 use std::{
+    fs,
     io::{self, BufRead, BufReader, Read, Seek, Write},
     path::{Path, PathBuf},
 };
@@ -15,24 +16,21 @@ pub struct ObjectStore {
     temp_dir: PathBuf,
 }
 
-fn allow_not_found<T>(result: io::Result<T>) -> io::Result<Option<T>> {
-    match result {
-        Ok(v) => Ok(Some(v)),
-        Err(e) => match e.kind() {
-            io::ErrorKind::NotFound => Ok(None),
-            _ => Err(e),
-        },
-    }
-}
-
-fn open_if_exists(path: &Path) -> io::Result<Option<std::fs::File>> {
-    allow_not_found(std::fs::File::open(path))
-}
-
 impl ObjectStore {
     pub fn at(git_dir: impl AsRef<Path>) -> io::Result<Self> {
         let hash_kind = HashType::Sha1;
         let objects_dir = git_dir.as_ref().join("objects");
+        {
+            let mut alternates = objects_dir.clone();
+            alternates.push("info");
+            alternates.push("alternates");
+            if alternates.exists() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    ".git/objects/info/alternates not supported",
+                ));
+            }
+        }
         let temp_dir = objects_dir.join("temp");
         Ok(Self {
             obj_store: gix_odb::at_opts(
@@ -53,28 +51,23 @@ impl ObjectStore {
     pub fn open_loose_object_stream(
         &self,
         oid: ObjectId,
-    ) -> Result<Option<(ObjectType, u64, impl BufRead)>, FindError> {
-        Ok(
-            match open_if_exists(&loose::object_path(self.objects_dir.clone(), oid))? {
-                Some(f) => Some(loose::file_to_stream(f)?),
-                None => None,
-            },
-        )
+    ) -> io::Result<(ObjectType, u64, impl BufRead)> {
+        loose::file_to_stream(fs::File::open(loose::object_path(
+            self.objects_dir.clone(),
+            oid,
+        ))?)
     }
 
     pub fn open_loose_object_seek(
         &self,
         oid: ObjectId,
-    ) -> Result<Option<(ObjectType, u64, Result<impl Read + Seek, impl BufRead>)>, FindError> {
-        let mut file = match open_if_exists(&loose::object_path(self.objects_dir.clone(), oid))? {
-            Some(f) => f,
-            None => return Ok(None),
-        };
+    ) -> io::Result<(ObjectType, u64, Result<impl Read + Seek, impl BufRead>)> {
+        let mut file = fs::File::open(loose::object_path(self.objects_dir.clone(), oid))?;
         flate::ZlibHeader::parse(&mut file)?;
-        let deflate = git_rtc_fmt::ParsedDeflate::parse(file).map_err(|e| Box::new(e))?;
-        Ok(Some(match deflate.into_reader() {
+        let deflate = git_rtc_fmt::ParsedDeflate::parse(file)?;
+        Ok(match deflate.into_reader() {
             Ok(reader) => {
-                let (kind, len, reader) = git_rtc_fmt::git::parse_seek_header(reader)?;
+                let (kind, len, reader) = loose::parse_seek_header(reader)?;
                 (kind, len, Ok(reader))
             }
             Err(mut reader) => {
@@ -82,7 +75,7 @@ impl ObjectStore {
                 let (kind, len, reader) = loose::file_to_stream(reader)?;
                 (kind, len, Err(reader))
             }
-        }))
+        })
     }
 
     pub fn open_packed_object(
@@ -162,16 +155,22 @@ impl WriteHandle {
         };
         let file = self.out.finish()?;
         let path = loose::object_path(self.objects_dir, oid);
-        match file.persist_noclobber(&path) {
-            Ok(_) => {}
-            Err(e) => match open_if_exists(&path)? {
-                Some(old) => {
+        if let Err(e) = file.persist_noclobber(&path) {
+            match fs::File::open(&path) {
+                Ok(old) => {
                     let reader1 = flate::decode_zlib(BufReader::new(old));
-                    let reader2 = flate::decode_zlib(BufReader::new(e.file));
-                    assert!(streams_equal(reader1, reader2)?);
+                    let mut cur = e.file;
+                    cur.rewind()?;
+                    let reader2 = flate::decode_zlib(BufReader::new(cur));
+                    assert!(streams_equal(reader1, reader2)?, "hash collision detected");
                 }
-                None => return Err(e.error),
-            },
+                Err(e2) => {
+                    return Err(match e2.kind() {
+                        io::ErrorKind::NotFound => e.error,
+                        _ => e2,
+                    })
+                }
+            }
         }
         Ok(oid)
     }

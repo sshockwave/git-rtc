@@ -1,5 +1,4 @@
 mod flate;
-pub mod git;
 
 pub use flate::ParsedDeflate;
 
