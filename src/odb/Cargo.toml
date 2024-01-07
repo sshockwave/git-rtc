@@ -1,16 +1,12 @@
 [package]
-name = "git-rtc"
+name = "git-rtc-odb"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[workspace]
-members = [
-  "src/cli",
-  "src/lib",
-  "src/api",
-  "src/fmt",
-  "src/vfs",
-  "src/odb",
-]
+[dependencies]
+gix-hash = "0.14.1"
+gix-odb = "0.56.1"
+git-rtc-fmt = { path = "../fmt" }
+gix-object = "0.40.1"
