@@ -1,3 +1,5 @@
+mod flate;
+
 pub use gix_hash::{Kind as HashType, ObjectId};
 pub use gix_object::{find::Error as FindError, Kind as ObjectType};
 use std::{
@@ -6,7 +8,7 @@ use std::{
 };
 
 fn file_to_stream(reader: impl Read) -> Result<(ObjectType, u64, impl BufRead), FindError> {
-    let mut reader = BufReader::new(git_rtc_fmt::decode_zlib(BufReader::new(reader)));
+    let mut reader = BufReader::new(flate::decode_zlib(BufReader::new(reader)));
     let (kind, len, _) = git_rtc_fmt::git::parse_stream_header(&mut reader)?;
     Ok((kind, len, reader))
 }
@@ -85,7 +87,7 @@ impl ObjectStore {
             Some(f) => f,
             None => return Ok(None),
         };
-        git_rtc_fmt::ZlibHeader::parse(&mut file)?;
+        flate::ZlibHeader::parse(&mut file)?;
         let deflate = git_rtc_fmt::ParsedDeflate::parse(file).map_err(|e| Box::new(e))?;
         Ok(Some(match deflate.into_reader() {
             Ok(reader) => {
@@ -181,8 +183,8 @@ impl WriteHandle {
             Ok(_) => {}
             Err(e) => match open_if_exists(&path)? {
                 Some(old) => {
-                    let reader1 = git_rtc_fmt::decode_zlib(BufReader::new(old));
-                    let reader2 = git_rtc_fmt::decode_zlib(BufReader::new(e.file));
+                    let reader1 = flate::decode_zlib(BufReader::new(old));
+                    let reader2 = flate::decode_zlib(BufReader::new(e.file));
                     assert!(streams_equal(reader1, reader2)?);
                 }
                 None => return Err(e.error),

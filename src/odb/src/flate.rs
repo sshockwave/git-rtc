@@ -1,5 +1,3 @@
-// https://www.ietf.org/rfc/rfc1950.txt
-
 use std::io::{BufRead, Read};
 
 #[derive(Debug)]
@@ -18,6 +16,7 @@ impl std::fmt::Display for Error {
     }
 }
 
+// https://www.ietf.org/rfc/rfc1950.txt
 pub struct ZlibHeader {
     pub window_size: usize,
     pub flevel: u8,

@@ -1,9 +1,7 @@
 mod flate;
-mod zlib;
 pub mod git;
 
 pub use flate::ParsedDeflate;
-pub use zlib::{decode_zlib, ZlibHeader};
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right
