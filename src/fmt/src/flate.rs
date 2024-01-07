@@ -71,7 +71,7 @@ impl<R: Read + Seek> ParsedDeflate<R> {
         Ok(Self { src, offsets, more })
     }
 
-    pub fn to_seek_reader(self) -> Result<impl Read + Seek, Self> {
+    pub fn into_seek_reader(self) -> Result<impl Read + Seek, Self> {
         if self.more {
             Ok(SeekReadDeflate {
                 parsed: self,

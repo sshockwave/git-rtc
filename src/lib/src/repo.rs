@@ -1,13 +1,33 @@
-use crate::obj::{Kind, Store};
+use git_rtc_fmt::git::{parse_seek_header, parse_stream_header};
+use gix_object::{find::Error as FindError, Kind};
 use std::{
-    io::{Read, Seek},
+    io::{BufRead, BufReader, Read, Seek},
     path::{Path, PathBuf},
 };
 
+// https://git-scm.com/docs/gitrepository-layout
 pub struct Repository {
     ref_store: gix_ref::file::Store,
     obj_store: gix_odb::Handle,
     obj_path: PathBuf,
+}
+
+fn file_to_stream(reader: impl Read + Seek) -> Result<(Kind, u64, impl BufRead), FindError> {
+    let mut reader = BufReader::new(git_rtc_fmt::decode_zlib(BufReader::new(reader)));
+    let (kind, size, _) = parse_stream_header(&mut reader)?;
+    Ok((kind, size, reader))
+}
+
+macro_rules! join_path {
+    ($path:expr, $first:expr, $($rest:expr),*) => {
+        {
+            let mut path = $path.join($first);
+            $(
+                path.push($rest);
+            )*
+            path
+        }
+    };
 }
 
 impl Repository {
@@ -51,57 +71,64 @@ impl Repository {
             bytes.iter().map(|b| byte_to_hex(*b)).collect()
         }
         match oid {
-            gix_hash::ObjectId::Sha1(sha1) => {
-                let mut path = self.obj_path.join(byte_to_hex(sha1[0]));
-                path.push(bytes_to_hex(&sha1[1..]));
-                path
-            }
+            gix_hash::ObjectId::Sha1(sha1) => join_path!(
+                self.obj_path,
+                byte_to_hex(sha1[0]),
+                bytes_to_hex(&sha1[1..])
+            ),
         }
     }
 
-    pub fn open_object(
+    fn open_object_from_packs(
+        &self,
+        oid: gix_hash::ObjectId,
+    ) -> Result<Option<(Kind, Vec<u8>)>, gix_object::find::Error> {
+        let mut buffer = Vec::new();
+        use gix_object::Find;
+        Ok(
+            if let Some(data) = self.obj_store.try_find(&oid, &mut buffer)? {
+                Some((data.kind, buffer))
+            } else {
+                None
+            },
+        )
+    }
+
+    pub fn open_object_seek(
         &self,
         oid: gix_hash::ObjectId,
     ) -> Result<
         Option<(
             Kind,
-            usize,
-            Store<impl AsRef<[u8]>, impl Read, impl Read + Seek>,
+            u64,
+            SeekResult<impl AsRef<[u8]>, impl BufRead, impl Read + Seek>,
         )>,
         gix_object::find::Error,
     > {
         let loose_path = self.loose_object_path(oid);
-        if loose_path.exists() {
+        Ok(if loose_path.exists() {
             let mut file = std::fs::File::open(loose_path)?;
             git_rtc_fmt::ZlibHeader::parse(&mut file)?;
             let deflate = git_rtc_fmt::ParsedDeflate::parse(file).map_err(|e| Box::new(e))?;
-            let (kind, len, data) = match deflate.to_seek_reader() {
-                Ok(seek) => Store::<&[u8], _, _>::Seek { src: seek },
-                Err(deflate) => Store::Read {
-                    src: git_rtc_fmt::decode_zlib(std::io::BufReader::new(deflate.into_inner())),
-                },
-            }
-            .parse_header()?;
-            Ok(Some((
-                kind,
-                len,
-                match data {
-                    Store::Buffer { .. } => unreachable!(),
-                    Store::Read { src } => Store::Read { src },
-                    Store::Seek { src } => Store::Seek { src },
-                },
-            )))
+            Some(match deflate.into_seek_reader() {
+                Ok(reader) => {
+                    let (kind, len, reader) = parse_seek_header(reader)?;
+                    (kind, len, SeekResult::Seek(reader))
+                }
+                Err(reader) => {
+                    let (kind, len, reader) = file_to_stream(reader.into_inner())?;
+                    (kind, len, SeekResult::Stream(reader))
+                }
+            })
         } else {
-            let mut buffer = Vec::new();
-            use gix_object::Find;
-            match self.obj_store.try_find(&oid, &mut buffer)? {
-                Some(data) => Ok(Some((
-                    data.kind,
-                    buffer.len(),
-                    Store::Buffer { data: buffer },
-                ))),
-                None => Ok(None),
-            }
-        }
+            self.open_object_from_packs(oid)?
+                .map(|(kind, data)| (kind, data.len() as u64, SeekResult::Buffer(data)))
+        })
     }
+}
+
+enum SeekResult<B, R, S> {
+    Buffer(B),
+    Stream(R),
+    Seek(S),
 }
