@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-btoi = "0.4.3"
 gix-hash = "0.14.1"
 gix-object = "0.40.1"
 gix-odb = "0.56.1"
