@@ -1,5 +1,6 @@
 mod repo;
 mod def;
+pub mod hash;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right
