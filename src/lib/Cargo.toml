@@ -11,5 +11,6 @@ gix-hash = "0.14.1"
 gix-object = "0.40.1"
 gix-odb = "0.56.1"
 gix-ref = "0.40.1"
+hex = "0.4.3"
 serde = { version = "1.0.195", features = ["derive"] }
 sha1 = { version = "0.10.6", features = ["compress"] }
