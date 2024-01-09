@@ -245,3 +245,61 @@ impl<R: Read + Seek> Seek for SeekReadDeflate<R> {
         Ok(())
     }
 }
+
+// DEFLATE
+// https://www.ietf.org/rfc/rfc1951.txt
+// At most 32768 symbols / block, configured by (1 << (memLevel + 6)) - 1, memLevel <= 9
+// Each symbol takes at most 32 bits on average.
+// Sliding window: 32KB
+// Huffman code at most 15 bits
+
+enum AccessBlock {
+    Uncompressed { block_end: u64 },
+}
+
+pub struct Index {
+    access_points: Vec<(AccessBlock, u64)>, // block info, out pos of the end of the block
+}
+
+const DEFLATE_WINDOW_SIZE: usize = 1 << 15;
+const DEFLATE_WINDOW_MASK: usize = DEFLATE_WINDOW_SIZE - 1;
+
+struct CyclicBuffer {
+    buf: [u8; DEFLATE_WINDOW_SIZE],
+    pos: usize,
+}
+
+impl Default for CyclicBuffer {
+    fn default() -> Self {
+        Self {
+            buf: [0u8; DEFLATE_WINDOW_SIZE],
+            pos: 0,
+        }
+    }
+}
+
+impl CyclicBuffer {
+    fn advance(&mut self, n: usize) {
+        self.pos = (self.pos + n) & DEFLATE_WINDOW_MASK;
+    }
+    fn push_byte(&mut self, byte: u8) {
+        self.buf[self.pos as usize] = byte;
+        self.advance(1);
+    }
+    fn push_ref(&mut self, len: usize, dist: usize) -> (&[u8], &[u8]) {
+        self.advance(len);
+        todo!()
+    }
+}
+
+enum Symbol {
+    Literal(u8),
+    Reference { len: usize, dist: usize },
+}
+
+// Fast Seeking with calculated window size
+// Prunning 1:
+// 1. Decode all symbols
+// 2. Search in reverse direction for all involved symbols
+// 3. Decode required symbols only
+// Caveat: can degrade to the original complexity

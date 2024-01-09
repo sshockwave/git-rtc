@@ -5,6 +5,10 @@ use ::{
     serde::{de, Deserialize, Serialize},
 };
 
+pub enum Kind {
+    SHA1,
+}
+
 pub trait Hasher: Default {
     type Sample: Serialize + for<'de> Deserialize<'de> + Eq + Clone;
     type Result: Serialize + for<'de> Deserialize<'de> + Eq + Clone + ToString;
@@ -14,7 +18,7 @@ pub trait Hasher: Default {
     fn write(&mut self, data: &[u8]);
 }
 
-mod sha1 {
+pub mod sha1 {
     use ::sha1::{
         compress,
         digest::{
@@ -64,7 +68,7 @@ mod sha1 {
             Self {
                 register,
                 buffer: Default::default(),
-                len: len,
+                len,
             }
         }
         fn end(mut self) -> Self::Result {
@@ -88,7 +92,7 @@ impl<const N: usize> ToString for HashBytes<N> {
     }
 }
 
-impl<'de, const N: usize> serde::Deserialize<'de> for HashBytes<N> {
+impl<'de, const N: usize> Deserialize<'de> for HashBytes<N> {
     fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
     where
         D: ::serde::Deserializer<'de>,
@@ -112,7 +116,7 @@ impl<'de, const N: usize> serde::Deserialize<'de> for HashBytes<N> {
     }
 }
 
-impl<const N: usize> serde::Serialize for HashBytes<N> {
+impl<const N: usize> Serialize for HashBytes<N> {
     fn serialize<S>(&self, serializer: S) -> ::core::result::Result<S::Ok, S::Error>
     where
         S: ::serde::Serializer,

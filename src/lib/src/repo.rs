@@ -1,5 +1,3 @@
-use gix_hash::ObjectId;
-use gix_object::{find::Error as FindError, Kind};
 use std::{
     io::{BufRead, BufReader, Read, Seek},
     path::{Path, PathBuf},
