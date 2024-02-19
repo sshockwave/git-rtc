@@ -253,14 +253,6 @@ impl<R: Read + Seek> Seek for SeekReadDeflate<R> {
 // Sliding window: 32KB
 // Huffman code at most 15 bits
 
-enum AccessBlock {
-    Uncompressed { block_end: u64 },
-}
-
-pub struct Index {
-    access_points: Vec<(AccessBlock, u64)>, // block info, out pos of the end of the block
-}
-
 const DEFLATE_WINDOW_SIZE: usize = 1 << 15;
 const DEFLATE_WINDOW_MASK: usize = DEFLATE_WINDOW_SIZE - 1;
 
@@ -303,3 +295,10 @@ enum Symbol {
 // 2. Search in reverse direction for all involved symbols
 // 3. Decode required symbols only
 // Caveat: can degrade to the original complexity
+
+// fast unsigned int, >= u16
+type BitBuffer = usize;
+
+mod block;
+mod huffman;
+pub use block::Index;
