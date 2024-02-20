@@ -7,4 +7,5 @@ members = [
   "src/api",
   "src/vfs",
   "src/odb",
+  "src/syn",
 ]
