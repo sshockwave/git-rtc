@@ -28,28 +28,27 @@ function SignalingServer({ server_url }: {
       }
     }
     ws.addEventListener('open', () => {
-      update_state();
-      ws.send('hello from client');
+      setReadyState(ws.readyState);
+      ws.send(JSON.stringify('hello from client'));
     }, { signal });
     ws.addEventListener('message', async (event) => {
       try {
-        let buffer: ArrayBuffer;
-        switch (ws.binaryType) {
-          case 'blob':
-            buffer = await event.data.arrayBuffer();
-            break;
-          case 'arraybuffer':
-            buffer = event.data;
-            break;
-          default:
-            throw new Error('unknown binaryType: ', ws.binaryType);
+        let buffer = event.data;
+        if (buffer instanceof Blob) {
+          buffer = await event.data.arrayBuffer();
         }
-        const data: SignalingData = JSON.parse(decoder.decode(buffer));
+        if (buffer instanceof ArrayBuffer) {
+          buffer = decoder.decode(buffer);
+        }
+        if (typeof buffer !== 'string') {
+          throw new Error('unknown binaryType: ' + ws.binaryType);
+        }
+        const data: SignalingData = JSON.parse(buffer);
+        console.log(data);
       } catch (e) {
         console.error(e);
       }
       // TODO
-      update_state();
     }, { signal });
     ws.addEventListener('error', () => {
       update_state();
@@ -68,9 +67,16 @@ function SignalingServer({ server_url }: {
 }
 
 export default function Home() {
+  const [url, setURL] = useState<URL | null>(null);
+  useAbort(signal => {
+    const url = new URL(window.location.href);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = '/ws';
+    setURL(url);
+  }, []);
   return (
     <main>
-      <SignalingServer server_url={'ws://localhost:9243/ws'} />
+      {url !== null ? <SignalingServer server_url={url} /> : null}
     </main>
   );
 }
