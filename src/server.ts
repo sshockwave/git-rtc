@@ -1,10 +1,10 @@
 import { WebSocketServer } from "ws";
 import { handleSocket } from "./signaling";
-import httpProxy from 'http-proxy';
+import { createProxyServer } from 'http-proxy';
 import { createServer as createHttpServer } from 'node:http';
 
-export function createServer() {
-  const proxy = httpProxy.createProxyServer({
+export function createDevServer() {
+  const proxy = createProxyServer({
     target: 'http://localhost:9243',
     ws: true,
   });
@@ -15,12 +15,18 @@ export function createServer() {
   server.on('upgrade', (req, socket, head) => {
     if (req.url === '/ws') {
       console.log('ws connection');
-      wss.handleUpgrade(req, socket, head, (ws, req) => {
-        handleSocket(ws);
-      });
+      wss.handleUpgrade(req, socket, head, handleSocket);
     } else {
       proxy.ws(req, socket, head);
     }
   });
   return server;
 }
+
+export function createProdServer() {
+  // TODO
+  return createHttpServer((req, res) => {
+  });
+}
+
+export const createServer = process.env.NODE_ENV !== "production" ? createDevServer : createProdServer;
