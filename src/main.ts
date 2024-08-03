@@ -1,16 +1,18 @@
-import { createServer } from "http";
-import { parse } from "url";
+import { createServer } from './server';
 
 const dev = process.env.NODE_ENV !== "production";
 
 async function main() {
-  const port = 9243;
-
-  console.log(
-    `> Server listening at http://localhost:${port} as ${
-      dev ? "development" : process.env.NODE_ENV
-    }`,
-  );
+  createServer().listen({
+    host: '127.0.0.1',
+    port: 9242,
+  }, (err, address) => {
+    if (err) {
+      console.error(err);
+      process.exit(1);
+    }
+    console.log(`Server listening at ${address}`);
+  });
 }
 
 main()
