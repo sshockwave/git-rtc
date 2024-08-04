@@ -14,14 +14,26 @@ export type SignalEvent = {
 } | {
   action: 'full-peer-list',
   peers: Peer[],
+} | {
+  action: 'receive-offer',
+  peer_id: string,
+  message: PeerMessage,
+};
+
+export type PeerMessage = PeerMessageInit & { is_polite: boolean };
+export type PeerMessageInit = {
+  description: RTCSessionDescriptionInit,
+} | {
+  candidate: RTCIceCandidateInit,
 };
 
 export type SignalRequest = {
   action: 'handshake',
   name: string,
 } | {
-  action: 'offer-sdp',
+  action: 'offer',
   peer_id: string,
+  message: PeerMessageInit,
 } | {
   action: 'fetch-peer-list',
 };

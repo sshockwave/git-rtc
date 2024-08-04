@@ -14,7 +14,6 @@ export function createDevServer() {
   });
   server.on('upgrade', (req, socket, head) => {
     if (req.url === '/ws') {
-      console.log('ws connection');
       wss.handleUpgrade(req, socket, head, handleSocket);
     } else {
       proxy.ws(req, socket, head);
