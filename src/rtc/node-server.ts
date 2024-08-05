@@ -1,48 +1,104 @@
-import { cwd } from 'process';
-import { access, constants, opendir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { assert_never, parse_message_as_json } from '../utils';
+import { public_stun_servers, setup } from '../rtc/establish';
+import { Peer as PeerInfo, PeerMessage, SignalEvent, SignalRequest } from '../message';
+import { RTCPeerConnection } from '@roamhq/wrtc';
 
 export type GitRtcServerInit = {
-  repo_mapping?: Map<string, string>;
+  repo_mapping: Map<string, string>;
+  server_name: string;
 };
 
-export async function generate_repo_mapping(scan_dir?: string) {
-  scan_dir = scan_dir ?? cwd();
-  // check if .git exists
-  let root_path = scan_dir;
-  async function file_exists(path: string) {
-    try {
-      await access(path, constants.F_OK);
-      return true;
-    } catch (err) {
-      return false;
-    }
-  }
-  while (true) {
-    // Check if the file exists in the current directory.
-    if (await file_exists(join(root_path, '.git'))) {
-      return new Map([['', root_path]]);
-    }
-    const new_root_path = dirname(root_path);
-    if (new_root_path === root_path) {
-      break;
-    }
-    root_path = new_root_path;
-  }
-  const map = new Map<string, string>();
-  for await (const entry of await opendir(scan_dir, {
-    encoding: 'utf8',
-  })) {
-    if (entry.isDirectory() && await file_exists(join(entry.name, '.git'))) {
-      map.set(entry.name, join(scan_dir, entry.name));
-    }
-  }
-  return map;
-}
+type Peer = PeerInfo & {
+  connection?: {
+    pc: RTCPeerConnection,
+    on_message: (message: PeerMessage) => void,
+    channels: Map<string, RTCDataChannel>,
+  };
+};
 
 export class GitRtcServer {
   repo_mapping: Map<string, string>;
+  name: string;
+  peer_list: Map<string, Peer> = new Map;
+
   constructor(options: GitRtcServerInit) {
-    this.repo_mapping = options.repo_mapping ?? new Map;
+    this.repo_mapping = new Map;
+    this.name = options.server_name;
+  }
+
+  add_signal_server(url: string | URL, options?: {
+    signal: AbortSignal,
+  }) {
+    const ws = new WebSocket(url);
+    options?.signal.addEventListener('abort', () => {
+      ws.close();
+    });
+    function send(data: SignalRequest) {
+      ws.send(JSON.stringify(data));
+    }
+    function send_peer_list() {
+      send({ action: 'fetch-peer-list' });
+    }
+    ws.addEventListener('open', () => {
+      send({ action: 'handshake', name: this.name });
+    });
+    let server_peer_list = new Map<string, Peer>(); // TODO
+    ws.addEventListener('message', async event => {
+      try {
+        const data: SignalEvent = await parse_message_as_json(event);
+        if (data.action === 'full-peer-list') {
+          this.peer_list = new Map(data.peers.map(peer => {
+            const old_peer = this.peer_list.get(peer.id);
+            if (old_peer) {
+              Object.assign(old_peer, peer);
+              return [peer.id, old_peer];
+            }
+            return [peer.id, peer];
+          }));
+        } else if (data.action === 'new-peer') {
+          this.peer_list.set(data.peer.id, data.peer);
+          if (this.peer_list.size !== data.peer_cnt) {
+            send_peer_list();
+          }
+        } else if (data.action === 'delete-peer') {
+          this.peer_list.delete(data.peer_id);
+          if (this.peer_list.size !== data.peer_cnt) {
+            send_peer_list();
+          }
+        } else if (data.action === 'receive-offer') {
+          const { peer_id } = data;
+          const peer = this.peer_list.get(peer_id);
+          if (!peer) {
+            send_peer_list();
+            return;
+          }
+          if (!('connection' in peer)) {
+            const pc = new RTCPeerConnection({
+              iceServers: public_stun_servers,
+            });
+            peer.connection = {
+              pc,
+              on_message: setup(pc, message => send({
+                action: 'offer',
+                peer_id: peer_id,
+                message,
+              })),
+              channels: new Map,
+            };
+            pc.addEventListener('connectionstatechange', () => {
+              console.log('connection state:', pc.connectionState);
+            });
+            pc.addEventListener('signalingstatechange', () => {
+              console.log('signaling state:', pc.signalingState);
+            });
+          }
+          peer.connection?.on_message(data.message);
+        } else {
+          assert_never(data);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    });
   }
 }

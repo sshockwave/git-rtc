@@ -10,3 +10,4 @@ Runtime requirements:
 
 - WebSocket ([WHATWG](https://websockets.spec.whatwg.org/#the-websocket-interface), [MDN](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket), Node.js 22)
 - WebRTC ([W3C](https://www.w3.org/TR/webrtc/), [MDN](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API))
+- TODO: allow two clients to prove that they are in fact the same client
