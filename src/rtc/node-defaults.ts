@@ -1,8 +1,8 @@
 import { hostname } from 'node:os';
-import { cwd } from 'process';
+import { cwd } from 'node:process';
 import { access, constants, opendir } from 'node:fs/promises';
 import { dirname, join, basename } from 'node:path';
-import { GitRtcServerInit } from './node-server';
+import type { GitRtcServerInit } from './server';
 
 export async function generate_repo_mapping(scan_dir?: string) {
   scan_dir = scan_dir ?? cwd();

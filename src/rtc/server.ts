@@ -1,5 +1,5 @@
 import { assert_never, parse_message_as_json } from '../utils';
-import { public_stun_servers, setup } from '../rtc/establish';
+import { public_stun_servers, setup } from './establish';
 import { Peer as PeerInfo, PeerMessage, SignalEvent, SignalRequest } from '../message';
 import { RTCPeerConnection } from '@roamhq/wrtc';
 

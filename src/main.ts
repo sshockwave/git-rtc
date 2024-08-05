@@ -1,6 +1,6 @@
 import { AddressInfo } from 'node:net';
 import { createServer } from './server';
-import { GitRtcServer } from './rtc/node-server';
+import { GitRtcServer } from './rtc/server';
 import { generate_default_server_options } from './rtc/node-defaults';
 
 async function main() {
