@@ -7,8 +7,11 @@
     "build": "next build web",
     "dev": "concurrently \"nodemon --exec ts-node src/main.ts\" \"next dev web -p 9243\""
   },
-  "author": "",
+  "author": "sshockwave",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "devDependencies": {
     "@fastify/http-proxy": "^9.5.0",
     "@types/http-proxy": "^1.17.14",

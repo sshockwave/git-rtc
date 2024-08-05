@@ -1,11 +1,13 @@
 import { PeerMessage, PeerMessageInit } from "../message";
 import { assert_never } from "../utils";
 
-export const public_stun_servers = [
-  'stun:stun.l.google.com:19302',
-  'stun:stun.voipbuster.com',
-  'stun:stun.wirlab.com',
-  'stun:stun.voipstunt.com',
+export const public_stun_servers: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun.voipbuster.com' },
+  { urls: 'stun:stun.wirlab.com' },
+  { urls: 'stun:stun.voipstunt.com' },
+  { urls: 'stun:freeturn.net:3479' },
+  // { urls: 'turn:freeturn.net:3479', username: 'free', credential: 'free' },
 ];
 
 // https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API/Perfect_negotiation

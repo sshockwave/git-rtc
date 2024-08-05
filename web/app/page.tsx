@@ -4,7 +4,8 @@ import { useAbort, useRerender } from "@/utils/hook";
 import styles from "./page.module.css";
 import { useRef, useState } from "react";
 import { Peer as PeerInfo, PeerMessage, PeerMessageInit, SignalEvent, SignalRequest } from '../../src/message';
-import { setup } from '../../src/rtc/establish';
+import { public_stun_servers, setup } from '../../src/rtc/establish';
+import { parse_message_as_json } from "../../src/utils";
 
 const red_emoji = '\u{1F534}';
 const yellow_emoji = '\u{1F7E1}';
@@ -29,7 +30,9 @@ class PeerChannel extends EventTarget {
 
 function PeerDisplay({ peer }: { peer: PeerChannel }) {
   useAbort(signal => {
-    const pc = new RTCPeerConnection();
+    const pc = new RTCPeerConnection({
+      iceServers: public_stun_servers,
+    });
     const handler = setup(pc, peer.send);
     peer.addEventListener('message', (event) => {
       handler((event as CustomEvent).detail);
@@ -41,13 +44,10 @@ function PeerDisplay({ peer }: { peer: PeerChannel }) {
       pc.close();
     }, { signal });
     const channel = pc.createDataChannel('git-rtc-control');
-    pc.addEventListener('signalingstatechange', () => {
-      console.log('signling state: ', pc.signalingState);
-    });
     pc.addEventListener('connectionstatechange', () => {
       console.log('connection state:', pc.connectionState);
     });
-  }, []);
+  }, [peer]);
   return <div>
     {peer.name} {peer.id}
   </div>;
@@ -88,17 +88,7 @@ function SignalingServer({ server_url }: {
     set_get_peer_list(() => () => peer_list);
     ws.addEventListener('message', async (event) => {
       try {
-        let buffer = event.data;
-        if (buffer instanceof Blob) {
-          buffer = await event.data.arrayBuffer();
-        }
-        if (buffer instanceof ArrayBuffer) {
-          buffer = decoder.decode(buffer);
-        }
-        if (typeof buffer !== 'string') {
-          throw new Error('unknown binaryType: ' + ws.binaryType);
-        }
-        const data: SignalEvent = JSON.parse(buffer);
+        const data: SignalEvent = await parse_message_as_json(event);
         if (data.action === 'full-peer-list') {
           peer_list = new Map(data.peers.map(peer => [peer.id, new PeerChannel(peer, send)]));
           rerender();
@@ -153,7 +143,7 @@ export default function Home() {
   useAbort(signal => {
     const url = new URL(window.location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    url.pathname = '/ws';
+    url.pathname = '/git-rtc-ws';
     setURL(url);
   }, []);
   return (

@@ -13,7 +13,7 @@ export function createDevServer() {
     proxy.web(req, res);
   });
   server.on('upgrade', (req, socket, head) => {
-    if (req.url === '/ws') {
+    if (req.url === '/git-rtc-ws') {
       wss.handleUpgrade(req, socket, head, handleSocket);
     } else {
       proxy.ws(req, socket, head);

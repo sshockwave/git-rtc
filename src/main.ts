@@ -1,13 +1,13 @@
 import { AddressInfo } from 'node:net';
 import { createServer } from './server';
-import { WebSocket } from 'ws';
 import { PeerMessage, SignalEvent, SignalRequest } from './message';
 import { hostname } from 'node:os';
-import { assert_never } from './utils';
+import { assert_never, parse_message_as_json } from './utils';
 import { Peer as PeerInfo } from './message';
-import { setup } from './rtc/establish';
+import { public_stun_servers, setup } from './rtc/establish';
 import { RTCPeerConnection } from '@roamhq/wrtc';
 import assert from 'node:assert';
+import { GitRtcServer } from './rtc/node-server';
 
 type Peer = PeerInfo & ({
   pc: RTCPeerConnection,
@@ -28,7 +28,7 @@ async function main() {
   });
   const ws_addr = new URL(address);
   ws_addr.protocol = ws_addr.protocol === 'http:' ? 'ws:' : 'wss:';
-  ws_addr.pathname = '/ws';
+  ws_addr.pathname = '/git-rtc-ws';
       const ws = new WebSocket(ws_addr);
       function send(data: SignalRequest) {
         ws.send(JSON.stringify(data));
@@ -36,13 +36,14 @@ async function main() {
       function send_peer_list() {
         send({ action: 'fetch-peer-list' });
       }
-      ws.on('open', () => {
+  ws.addEventListener('open', () => {
         send({ action: 'handshake', name: hostname() });
       });
       let peer_list: Map<string, Peer> = new Map;
-      ws.on('message', message => {
+  const git_rtc_server = new GitRtcServer({});
+  ws.addEventListener('message', async event => {
         try {
-          const data: SignalEvent = JSON.parse(message.toString('utf-8'));
+      const data: SignalEvent = await parse_message_as_json(event);
           if (data.action === 'full-peer-list') {
             peer_list = new Map(data.peers.map(peer => {
               const old_peer = peer_list.get(peer.id);
@@ -70,7 +71,9 @@ async function main() {
               return;
             }
             if (!('pc' in peer)) {
-              const pc = new RTCPeerConnection();
+          const pc = new RTCPeerConnection({
+            iceServers: public_stun_servers,
+          });
               Object.assign(peer, {
                 pc,
                 on_message: setup(pc, message => send({
@@ -84,9 +87,6 @@ async function main() {
               });
               pc.addEventListener('signalingstatechange', () => {
                 console.log('signaling state:', pc.signalingState);
-              });
-              pc.addEventListener('datachannel', e => {
-                console.log('new datachannel:', e);
               });
             }
             assert('pc' in peer);
